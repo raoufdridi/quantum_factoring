@@ -1,0 +1,181 @@
+
+with(Groebner):
+infolevel[GroebnerBasis]:=2:
+
+
+myfunction := proc(subsys, extra_eqs, b)
+ local aux_eqs, qvars, pvars, zvars, ranking, mypoly, nsys, B0, zsys, psys;
+ nsys  := map(eq-> lhs(eq)-rhs(eq), subsys):
+ aux_eqs := map(x-> product(x-i_, i_=0..2^b-1), indets(nsys)):
+ nsys  := [op(nsys), op(aux_eqs)]:
+ nsys  := {op(nsys), op(extra_eqs)};  
+ pvars := select(has, indets(nsys), p);
+ qvars := select(has, indets(nsys), q);
+ zvars := select(has, indets(nsys), z);
+
+ ranking := [op(zvars), op(pvars), op(qvars)]:  
+
+ B0 := Basis(nsys, plex(op(ranking))):
+ zsys := []:
+ psys := []:
+ for mypoly in B0 do
+  if has(mypoly, z) then zsys := [op(zsys), mypoly];
+    #print (mypoly);
+  else psys := [op(psys), mypoly];
+  fi;
+ #if degree(mypoly)=1 then print(mypoly) fi:
+od:
+[zsys, psys, B0]
+end:
+
+showme := proc(l)
+  local eq;
+  for eq in l do print("-------"); print(eq) od;
+end:
+
+mybool := proc(ll, x)
+ #return  is(nops(ll) <=2)
+ return  is(degree(ll) <=3)
+end:
+
+mycountingfunction := proc(H)
+  local res, l, x;
+  res[1] := 0;
+  res[2] := 0;
+  l := map(degree, [op(expand(H))]):
+  for x in l do
+    if x=3 then res[1] := res[1] +1 
+    elif x=4 then res[2] := res[2] +1 
+    fi
+  od;
+  print ("number of vars ", nops(indets(H)), "vars eliminated ", indets(sys) minus indets(H));
+  print ("number of degree 3 terms ", res[1]);
+  print ("number of degree 4 terms ", res[2]);
+end:
+
+
+
+
+sys_generator := proc(M, b)
+  local m, P, Q, res, wi, r_, s,  r, Z, i, j, lhs_, rhs_, beast, aux_eqs, aux_eqs2, sys, Sys;
+  
+  r_ := 2^b; 
+  s  := ceil(log[r_](M))-1: #print(%); 
+  
+  for i from 0 to s do
+   m[i]  := convert(M, base, r_)[i+1]
+  od;
+
+  #sq := ceil(log[r_](M)/2);  
+  #sp := ceil(log[r_](M/5));
+
+  #print ("sq, sp", sq, sp);
+    
+  P :=   add(p[i]* r^ i, i=0..sp);
+  Q :=   add(q[i]* r^ i, i=0..sq);  
+  
+  res := collect(P*Q, r):
+
+  sys := [q[0]*p[0] = m[0] + r_*z[0,1]]:
+  Z := table():
+  Z[0, 1] := true:
+  Z[1, 2] := true:
+
+
+  #print("s", s);
+  for i from 1 to s do
+    lhs_ := coeff(res, r^i);
+    wi := nops(lhs_)*(r_-1)^2;
+    wi := wi -m[i];
+    #print (lhs_);
+    for j from 0 to i-1 do 
+      if Z[j, i]=true then 
+       lhs_ := lhs_ +  z[j, i];
+       wi := wi + r_-1 
+      fi;
+    od: 
+    #print(i);
+    rhs_ :=  m[i];
+    wi := floor(log[r_](wi));
+      
+    for j from 1 to  wi do
+      if i+j <= s  then 
+       Z[i, i+j] := true;
+       rhs_ := rhs_ + r_^(j)* z[i, i+j]
+      fi
+     od:
+    sys := [op(sys), lhs_ = rhs_]
+  od:
+
+  # base r constraint 
+  aux_eqs := map(x-> product(x-i_, i_=0..r_-1), indets(sys) minus {r}):
+
+  # pq must have same of bits as M
+  aux_eqs2:= {seq(coeff(res, r^i), i=s+1..degree(res, r))}:
+
+  Sys := {op(map(eq-> lhs(eq) - rhs(eq), sys))} union aux_eqs union aux_eqs2:
+  sys, aux_eqs, Sys, aux_eqs2
+end:
+
+
+asolve := proc(ListH)
+ indets(ListH);
+ map(x->x*(x-1), %) union {op(ListH)};
+ [solve(%)];
+end:
+
+check := proc(sols, ListH)
+ local pq, vals, res, val; 
+ ifactors(M);
+ pq := {op(map(l->l[1], %[2]))};  
+ vals := seq(subs(sol, {P, Q}), sol in sols);  
+ res := true;
+ for val in vals do
+   res := res and is(val =pq)
+ od;
+ res
+end:
+
+
+mapping_variables := proc(H)
+ local res, pvars, qvars, zvars, vars, tr;
+ pvars := select(has, indets(H), p):
+ qvars := select(has, indets(H), q):
+ zvars := select(has, indets(H), z):
+ vars := [op(pvars), op(qvars), op(zvars)]:
+ tr := [seq(vars[i] =x[i], i=1..nops(vars))]; 
+ print("mapping", tr);
+ tr
+end:
+
+
+quadratize := proc(F)
+  local res, PQ;
+  if degree(F) =1 then return F^2 fi;
+  if degree(F)= 2 then
+   PQ :=  LeadingTerm(F, plex(op(indets(F))))[-1]
+ fi:
+ 2*((op(PQ)[1] + op(PQ)[2])/2  -1/4 + F-PQ)^2 - 1/8
+end:
+
+get_matlab_qubo := proc(H, varsorder)
+  local mybooleanfunction, cf1, cf2, i, j, res, linearH;
+  
+  mybooleanfunction := proc(f, d)
+    degree(f, indets(f))=d
+  end:
+  res := Matrix(nops(varsorder),nops(varsorder), 0) :
+  cf1 := select(mybooleanfunction, [op(H)], 1);
+  cf2 := select(mybooleanfunction, [op(H)], 2);
+  for i from 1 to nops(varsorder) do
+    for j from 1 to nops(varsorder) do  
+     res[i, j] := coeff(coeff(H, varsorder[i]), varsorder[j])
+    od:
+  od:
+  linearH := H - add(t, t in cf2);
+  for i from 1 to nops(varsorder) do
+    res[i, i] := coeff(linearH, varsorder[i])
+  od;
+  res;
+end:
+
